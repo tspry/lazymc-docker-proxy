@@ -44,7 +44,9 @@ FROM --platform=$BUILDPLATFORM rust-setup AS app-builder
 WORKDIR /usr/src/lazymc-docker-proxy
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
-RUN cargo build --target "$(cat /rust-arch)" --release --locked
+# --locked is omitted so cargo can reconcile the lock file after dependency changes.
+# Once a successful build produces a fresh Cargo.lock, commit it and restore --locked.
+RUN cargo build --target "$(cat /rust-arch)" --release
 RUN mv /usr/src/lazymc-docker-proxy/target/"$(cat /rust-arch)" /usr/src/lazymc-docker-proxy/target/output_final
 
 # final image — Alpine so that the `ssh` client binary is available for remote PC management
