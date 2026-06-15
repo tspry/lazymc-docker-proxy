@@ -5,17 +5,16 @@ edition = "2021"
 rust-version = "1.74.0"
 
 [dependencies]
-bollard = "0.20.2"
 clap = { version = "4.6.0", features = ["derive"] }
 ctrlc = { version = "3.5.2", features = ["termination"] }
-futures = "0.3.32"
 log = "0.4"
 pretty_env_logger = "0.5"
 regex = "1.12.3"
 serde = "1.0.228"
 strum = { version = "0.28.0", features = ["derive"] }
-tokio = { version = "1.50.0", default-features = false, features = [
-    "rt-multi-thread",
-] }
 toml = "1.1.0"
 version-compare = "0.2.1"
+
+# GPIO support — only compiled when targeting ARM (Raspberry Pi)
+[target.'cfg(any(target_arch = "arm", target_arch = "aarch64"))'.dependencies]
+rppal = "0.17"

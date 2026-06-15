@@ -47,36 +47,27 @@ COPY src ./src
 RUN cargo build --target "$(cat /rust-arch)" --release --locked
 RUN mv /usr/src/lazymc-docker-proxy/target/"$(cat /rust-arch)" /usr/src/lazymc-docker-proxy/target/output_final
 
-# health init
-FROM --platform=$BUILDPLATFORM busybox:1.37.0-uclibc AS health-init
-RUN mkdir -p /app && echo "STARTING" > /app/health
+# final image — Alpine so that the `ssh` client binary is available for remote PC management
+FROM alpine:3.20
 
-# final image
-FROM scratch
+RUN apk add --no-cache openssh-client ca-certificates
 
-# setup lazymc version
+# setup lazymc version env vars (used by config.rs to select the right binary)
 ARG LAZYMC_VERSION
 ENV LAZYMC_VERSION=$LAZYMC_VERSION
 ARG LAZYMC_LEGACY_VERSION
 ENV LAZYMC_LEGACY_VERSION=$LAZYMC_LEGACY_VERSION
 
-# Copy the compiled binary from the lazymc-builder stage
+# Copy the compiled binaries
 COPY --from=lazymc-builder /usr/src/lazymc/target/output_final/release/lazymc /usr/local/bin/lazymc
-
-# Copy the compiled binary from the lazymc-legacy-builder stage
 COPY --from=lazymc-legacy-builder /usr/src/lazymc/target/output_final/release/lazymc /usr/local/bin/lazymc-legacy
-
-# Copy the compiled binary from the lazymc-docker-proxy stage
 COPY --from=app-builder /usr/src/lazymc-docker-proxy/target/output_final/release/lazymc-docker-proxy /usr/local/bin/lazymc-docker-proxy
 
-# Copy the health init state
-COPY --from=health-init /app/health /app/health
+# Initialise health state file
+RUN mkdir -p /app && echo "STARTING" > /app/health
 
-# Set the working directory
 WORKDIR /app
 
-# Set the healthcheck
 HEALTHCHECK --start-period=1m --interval=5s --retries=24 CMD ["lazymc-docker-proxy", "--health"]
 
-# Run lazymc by default
 ENTRYPOINT ["lazymc-docker-proxy"]

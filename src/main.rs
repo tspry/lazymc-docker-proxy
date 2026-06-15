@@ -2,18 +2,18 @@
 extern crate log;
 
 mod command;
-mod docker;
 mod entrypoint;
 mod health;
 mod logging;
+mod machine;
 
 use clap::Parser;
 
-/// Wrapper for lazymc to run against a docker minecraft server
+/// Proxy that puts a remote Minecraft PC to sleep when idle and wakes it on player join
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// Execute with this flag when running as a lazymc start command
+    /// Execute with this flag when running as the lazymc server start command
     #[arg(short, long)]
     command: bool,
 
@@ -26,7 +26,6 @@ struct Args {
     health: bool,
 }
 
-/// Main entrypoint for the application
 fn main() {
     logging::init();
 

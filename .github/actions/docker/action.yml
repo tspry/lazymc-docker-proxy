@@ -2,7 +2,7 @@ name: Docker
 description: Build and push docker image
 inputs:
   publish:
-    description: "Run the action without pushing the image"
+    description: "Push the image to the registry"
     required: false
     default: "false"
 
@@ -14,10 +14,10 @@ runs:
 
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v4
-      
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4
-      
+
     - name: Log in to the Container registry
       uses: docker/login-action@v4
       with:
@@ -30,6 +30,11 @@ runs:
       uses: docker/metadata-action@v6
       with:
         images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          # tag with the exact git tag (e.g. v1.2.3)
+          type=ref,event=tag
+          # also tag as latest on every tag push
+          type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
 
     - name: Build and push Docker image
       id: push
@@ -39,11 +44,12 @@ runs:
         platforms: linux/amd64,linux/arm64
         push: ${{ inputs.publish }}
         tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
 
     - name: Generate artifact attestation
       uses: actions/attest-build-provenance@v4
       if: ${{ inputs.publish == 'true' }}
       with:
-        subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME}}
+        subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
         subject-digest: ${{ steps.push.outputs.digest }}
-        push-to-registry: ${{ inputs.publish }}
+        push-to-registry: true

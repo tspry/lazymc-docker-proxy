@@ -5,81 +5,65 @@ use regex::Regex;
 use std::{
     io::{BufRead, BufReader},
     process::{self, exit},
-    sync::OnceLock,
+    sync::{Arc, OnceLock},
 };
 
-use crate::{
-    docker,
-    health::{self},
-};
+use crate::{health, machine};
 
-/// Entrypoint for the application
 pub fn run() {
-    // Ensure all server containers are stopped before starting
-    info!(target: "lazymc-docker-proxy::entrypoint", "Ensuring all server containers are stopped...");
-    docker::stop_all_containers();
+    let config = Config::from_env();
+    let group = config.group().to_string();
+    let machine_config = Arc::new(config.machine.clone());
 
-    let labels_list = docker::get_container_labels();
-    let mut configs: Vec<Config> = Vec::new();
-    let mut children: Vec<process::Child> = Vec::new();
+    info!(target: "lazymc-docker-proxy::entrypoint", "Starting lazymc for group: {}...", group);
 
-    for label in labels_list {
-        configs.push(Config::from_container_labels(label));
-    }
+    let mut child: process::Child = config
+        .start_command()
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
 
-    if configs.is_empty() {
-        configs.push(Config::from_env());
-    }
+    // Forward child stdout/stderr through our logger
+    let mut stdout = child.stdout.take();
+    let group_clone = group.clone();
+    let mc_clone = Arc::clone(&machine_config);
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stdout.take().unwrap());
+        for line in reader.lines() {
+            wrap_log(&group_clone, line, &mc_clone);
+        }
+    });
 
-    for config in configs {
-        let group: String = config.group().into();
+    let mut stderr = child.stderr.take();
+    let group_clone2 = group.clone();
+    let mc_clone2 = Arc::clone(&machine_config);
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stderr.take().unwrap());
+        for line in reader.lines() {
+            wrap_log(&group_clone2, line, &mc_clone2);
+        }
+    });
 
-        info!(target: "lazymc-docker-proxy::entrypoint", "Starting lazymc process for group: {}...", group.clone());
-        let mut child: process::Child = config
-            .start_command()
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .unwrap();
-
-        let mut stdout = child.stdout.take();
-        let group_clone = group.clone();
-        std::thread::spawn(move || {
-            let stdout_reader = BufReader::new(stdout.take().unwrap());
-            for line in stdout_reader.lines() {
-                wrap_log(&group_clone, line);
-            }
-        });
-
-        let mut stderr = child.stderr.take();
-        std::thread::spawn(move || {
-            let stderr_reader = BufReader::new(stderr.take().unwrap());
-            for line in stderr_reader.lines() {
-                wrap_log(&group.clone(), line)
-            }
-        });
-
-        children.push(child);
-    }
-
-    // If this app receives a signal, stop all server containers
+    // On SIGTERM stop the remote server and shut the PC down
+    let mc_shutdown = Arc::clone(&machine_config);
     ctrlc::set_handler(move || {
-        info!(target: "lazymc-docker-proxy::entrypoint", "Received exit signal. Stopping all server containers...");
-        docker::stop_all_containers();
+        info!(target: "lazymc-docker-proxy::entrypoint", "Received exit signal. Stopping server...");
+        machine::stop_server(&mc_shutdown);
+        machine::shutdown_pc(&mc_shutdown);
         exit(0);
-    }).unwrap();
+    })
+    .unwrap();
 
-    // Set the health status to healthy
     health::healthy();
 
-    // wait indefinitely
     loop {
         std::thread::park();
     }
 }
 
-/// Wrap log messages from child processes
-fn wrap_log(group: &String, line: Result<String, std::io::Error>) {
+/// Re-emit a log line from a child process, tagged with the group name
+fn wrap_log(group: &str, line: Result<String, std::io::Error>, machine_config: &Arc<machine::MachineConfig>) {
     static LOG_REGEX: OnceLock<Regex> = OnceLock::new();
     let regex = LOG_REGEX.get_or_init(|| {
         Regex::new(r"(?P<level>[A-Z]+)\s+(?P<target>[a-zA-Z0-9:_-]+)\s+>\s+(?P<message>.+)$")
@@ -87,28 +71,35 @@ fn wrap_log(group: &String, line: Result<String, std::io::Error>) {
     });
 
     if let Ok(line) = line {
-        if let Some(captures) = regex.captures(&line) {
-            let level: Level = captures.name("level").unwrap().as_str().parse().unwrap();
-            let target = captures.name("target").unwrap().as_str();
-            let message = captures.name("message").unwrap().as_str();
+        if let Some(caps) = regex.captures(&line) {
+            let level: Level = caps
+                .name("level")
+                .unwrap()
+                .as_str()
+                .parse()
+                .unwrap_or(Level::Info);
+            let target = caps.name("target").unwrap().as_str();
+            let message = caps.name("message").unwrap().as_str();
 
-            let wrapped_target = &format!("{}::{}", group, target);
-            let log_message = message.to_string();
-            log!(target: wrapped_target, level, "{}", log_message);
-            handle_log(group, &level, &log_message);
+            let wrapped_target = format!("{}::{}", group, target);
+            let msg = message.to_string();
+            log!(target: &wrapped_target, level, "{}", msg);
+            handle_log(group, &level, &msg, machine_config);
         } else {
             print!("{}", line);
         }
     }
 }
 
-/// Handle log messages that require special attention
-fn handle_log(group: &str, level: &Level, message: &str) {
+/// React to specific lazymc log messages that require intervention
+fn handle_log(group: &str, level: &Level, message: &str, machine_config: &Arc<machine::MachineConfig>) {
     if let (Level::Warn, "Failed to stop server, no more suitable stopping method to use") =
         (level, message)
     {
-        warn!(target: "lazymc-docker-proxy::entrypoint", "Unexpected server state detected, force stopping {} server container...", group);
-        docker::stop(group.to_string());
-        info!(target: "lazymc-docker-proxy::entrypoint", "{} server container forcefully stopped", group);
+        warn!(target: "lazymc-docker-proxy::entrypoint",
+            "Unexpected server state for group '{}'. Force-stopping Minecraft and shutting down PC...", group);
+        machine::stop_server(machine_config);
+        machine::shutdown_pc(machine_config);
+        info!(target: "lazymc-docker-proxy::entrypoint", "Force shutdown sequence complete for group '{}'.", group);
     }
 }

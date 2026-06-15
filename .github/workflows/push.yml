@@ -1,14 +1,11 @@
 name: Integration Test
+
 on:
   push:
     branches:
       - master
       - main
   pull_request:
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   find-tests:
@@ -40,14 +37,13 @@ jobs:
     steps:
       - name: Setup BATS
         uses: mig4/setup-bats@v1
-        
+
       - name: Checkout repository
         uses: actions/checkout@v5
-      
+
       - name: Run tests
         uses: nick-fields/retry@v4
         with:
           timeout_minutes: 30
           max_attempts: 5
           command: bats ./tests/bats/${{ matrix.inputs }}
-      
