@@ -1,0 +1,21 @@
+# Git
+.git
+.gitignore
+
+# CI / docs
+.github
+docs
+*.md
+
+# Rust build artifacts
+target/
+
+# Local compose and test files
+docker-compose.yaml
+tests/
+
+# Editor / OS
+.vscode
+.idea
+*.swp
+.DS_Store
