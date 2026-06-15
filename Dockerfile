@@ -27,7 +27,7 @@ WORKDIR /usr/src/lazymc
 ARG LAZYMC_VERSION
 ENV LAZYMC_VERSION=$LAZYMC_VERSION
 RUN git clone --branch v$LAZYMC_VERSION https://github.com/timvisee/lazymc .
-RUN cargo build --target "$(cat /rust-arch)" --release --locked
+RUN cargo build --target "$(cat /rust-arch)" --release
 RUN mv /usr/src/lazymc/target/"$(cat /rust-arch)" /usr/src/lazymc/target/output_final
 
 # build lazymc-legacy
@@ -36,7 +36,7 @@ WORKDIR /usr/src/lazymc
 ARG LAZYMC_LEGACY_VERSION
 ENV LAZYMC_LEGACY_VERSION=$LAZYMC_LEGACY_VERSION
 RUN git clone --branch v$LAZYMC_LEGACY_VERSION https://github.com/timvisee/lazymc .
-RUN cargo build --target "$(cat /rust-arch)" --release --locked
+RUN cargo build --target "$(cat /rust-arch)" --release
 RUN mv /usr/src/lazymc/target/"$(cat /rust-arch)" /usr/src/lazymc/target/output_final
 
 # build this app
@@ -44,7 +44,7 @@ FROM --platform=$BUILDPLATFORM rust-setup AS app-builder
 WORKDIR /usr/src/lazymc-docker-proxy
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
-RUN cargo build --target "$(cat /rust-arch)" --release --locked
+RUN cargo build --target "$(cat /rust-arch)" --release
 RUN mv /usr/src/lazymc-docker-proxy/target/"$(cat /rust-arch)" /usr/src/lazymc-docker-proxy/target/output_final
 
 # final image — Alpine so that the `ssh` client binary is available for remote PC management
